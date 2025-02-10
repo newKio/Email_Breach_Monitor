@@ -9,6 +9,7 @@ import time
 import base64
 import json
 import traceback
+import sys
 
 HIBP_API_KEY = os.getenv("HIBP_API_KEY")
 EMAIL_PASSWORD = os.getenv("HIBP_EMAIL_PASSWORD")
@@ -20,7 +21,7 @@ with open('emails.txt', 'r') as f:
 
 breached_emails = {}
 
-timeout = 10 # Pwned 1 subscription allows 10 email checks a minute so 6 seconds per email but added 4 seconds to be sure status code 429 is never recieved
+timeout = 8 # Pwned 1 subscription allows 10 email checks a minute so 6 seconds per email but added 2 seconds to be sure status code 429 is never recieved
 
 HEADERS = {
     "hibp-api-key": HIBP_API_KEY,
@@ -39,6 +40,8 @@ def send_error_email(error_message):
     message["To"] = EMAIL_RECIPIENT
 
     service.users().messages().send(userId="me", body={"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}).execute()
+
+    sys.exit(1)  # Exit script if error occurs (will not send multiple emails for same error)
 
 
 def authenticate_gmail():
@@ -86,7 +89,6 @@ def check_breaches(email):
     try:
         url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}?truncateResponse=false"
         response = requests.get(url, headers=HEADERS)
-        raise ValueError("Simulated error for testing!")  # Force an error
 
         if response.status_code == 200:
             return response.json()  # Returns list of breaches
