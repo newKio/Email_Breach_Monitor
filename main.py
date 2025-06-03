@@ -1,20 +1,18 @@
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 from email.mime.text import MIMEText
+import smtplib
+from email.message import EmailMessage
+
 from datetime import datetime
 import requests
 import os
 import time
-import base64
 import json
 import traceback
 import sys
 
 HIBP_API_KEY = os.getenv("HIBP_API_KEY")
-EMAIL_PASSWORD = os.getenv("HIBP_EMAIL_PASSWORD")
-EMAIL_SENDER = os.getenv("HIBP_EMAIL_SENDER")
-EMAIL_RECIPIENT = os.getenv("HIBP_EMAIL_RECIPIENT")
+email_address = str(os.getenv("protonmail_email_address"))
+protonmail_bridge_pass = str(os.getenv("protonmail_bridge_pass"))
 
 with open('emails.txt', 'r') as f:
     emails = [email.strip() for email in f.readlines()]
@@ -28,62 +26,50 @@ HEADERS = {
     "User-Agent": "EmailSecurityCheck"
 }
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-
-
+# function to email error code using ProtonMail Bridge
 def send_error_email(error_message):
-    service = build("gmail", "v1", credentials=authenticate_gmail())
-
+    # create message object
     message = MIMEText(f"🚨 An error occurred in your script:\n\n{error_message}")
     message["Subject"] = "🚨 Have I Been Pwned - Script Error Alert"
-    message["From"] = EMAIL_SENDER
-    message["To"] = EMAIL_RECIPIENT
+    message["From"] = email_address
+    message["To"] = email_address
 
-    service.users().messages().send(userId="me", body={"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}).execute()
+    with smtplib.SMTP('127.0.0.1', 1025) as smtp:  # Port 1025 is default for Bridge
+        smtp.login(email_address, protonmail_bridge_pass)
+        smtp.send_message(message)
 
-    sys.exit(1)  # Exit script if error occurs (will not send multiple emails for same error)
+    sys.exit(1)  # Exit script if error occurs (will show in task scheduler that error occurred)
 
-
-def authenticate_gmail():
-    creds = None
-    token_path = "token.json"
-
-    # Check if token.json exists to avoid re-authentication
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-
-    # If no valid credentials, authenticate manually
-    if not creds or not creds.valid or not creds.refresh_token:
-        flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-        creds = flow.run_local_server(port=8080, access_type="offline", prompt="consent")
-
-        with open(token_path, "w") as token_file:
-            token_file.write(creds.to_json())
-
-    return creds
-
+# function to send email using ProtonMail Bridge
 def send_email_alert():
     try:
-        service = build("gmail", "v1", credentials=authenticate_gmail())
-
+        # Build the message body exactly as before
         message_body = "The following emails have been found in breaches:\n\n"
         
         for email, breaches in breached_emails.items():
             message_body += f"🚨 {email} found in {len(breaches)} breach(es):\n"
             for breach in breaches:
                 message_body += f"  - {breach['name']} ({breach['date']})\n"
-                message_body += f"    More info: https://haveibeenpwned.com/PwnedWebsites#{breach['name']}\n"
+                message_body += (
+                    f"    More info: https://haveibeenpwned.com/PwnedWebsites#{breach['name']}\n"
+                )
             message_body += "\n"
 
+        # Create the MIMEText message
         message = MIMEText(message_body)
         message["Subject"] = "🚨 Have I Been Pwned - Data Breach Alert"
         message["From"] = EMAIL_SENDER
         message["To"] = EMAIL_RECIPIENT
 
-        service.users().messages().send(userId="me", body={"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}).execute()
+        # Send via ProtonMail Bridge (local SMTP at 127.0.0.1:1025)
+        with smtplib.SMTP("127.0.0.1", 1025) as smtp:
+            smtp.login(email_address, protonmail_bridge_pass)
+            smtp.send_message(message)
 
     except Exception as e:
+        # If anything goes wrong, fall back to the error‐email routine
         send_error_email(traceback.format_exc())
+
 
 def check_breaches(email):
     try:
